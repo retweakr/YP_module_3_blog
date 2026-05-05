@@ -1,65 +1,100 @@
-# Blog platform (module 3)
+# Блог-платформа (модуль 3)
 
-Rust workspace with four crates:
+Rust workspace из четырёх крейтов:
 
-| Crate | Role |
-|-------|------|
-| **blog-server** | HTTP (Actix) + gRPC (Tonic), PostgreSQL (sqlx), JWT + Argon2 |
-| **blog-client** | Shared library: HTTP (`reqwest`) and gRPC (`tonic`) transports |
-| **blog-cli** | CLI using `blog-client`, optional `--grpc`, token file `.blog_token` |
-| **blog-wasm** | Browser WASM UI via `gloo-net` + `wasm-bindgen` (HTTP only) |
+| Крейт | Назначение |
+|-------|------------|
+| **blog-server** | HTTP (Actix) + gRPC (Tonic), PostgreSQL (sqlx), JWT и Argon2 |
+| **blog-client** | Общая библиотека: транспорты HTTP (`reqwest`) и gRPC (`tonic`) |
+| **blog-cli** | CLI на базе `blog-client`, флаг `--grpc`, токен в файле `.blog_token` |
+| **blog-wasm** | WASM-интерфейс в браузере (`gloo-net`, `wasm-bindgen`), только HTTP |
 
-Architecture on the server follows **clean architecture**: `domain` → `application` → `data` / `infrastructure` → `presentation` (`http_handlers`, `grpc_service`, JWT middleware).
+На сервере используется **чистая архитектура**: `domain` → `application` → `data` / `infrastructure` → `presentation` (HTTP-обработчики, gRPC, JWT middleware).
 
-## Prerequisites
+## Структура репозитория
 
-- Rust stable (`rustup`), PostgreSQL 14+ (or compatible).
-- Optional: [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) for ergonomic WASM bundles.
-- For WASM builds: `rustup target add wasm32-unknown-unknown`.
-
-## Configuration (server)
-
-Create `blog-server/.env` (see `blog-server/.env.example`):
-
-```env
-DATABASE_URL=postgres://USER:PASSWORD@localhost/blog_db
-JWT_SECRET=at_least_32_characters_for_hmac_secret_key
+```
+.
+├── Cargo.toml              # workspace
+├── README.md
+├── index.html              # страница для WASM (после сборки pkg)
+├── blog-server/            # бэкенд: миграции, proto, исходники
+├── blog-client/            # библиотека клиента + копия blog.proto
+├── blog-cli/               # консольный клиент
+└── blog-wasm/              # WASM-библиотека (cdylib)
 ```
 
-The server loads `blog-server/.env` automatically (via `CARGO_MANIFEST_DIR`), then falls back to the process environment.
+## Требования
 
-- **HTTP** listens on **`0.0.0.0:8080`** (`/api/...`).
-- **gRPC** listens on **`0.0.0.0:50051`** (`BlogService`).
+- **Rust** (stable), [`rustup`](https://rustup.rs/).
+- **PostgreSQL** 14+ (или совместимая версия).
+- Для сборки WASM: `rustup target add wasm32-unknown-unknown`.
+- Опционально: [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) для удобной упаковки WASM.
 
-## Database
+## Переменные окружения (сервер)
 
-Create an empty database, then start the server — **migrations run on startup** (`blog-server/migrations/`).
+Создайте файл `blog-server/.env` по образцу `blog-server/.env.example`:
+
+| Переменная | Описание |
+|------------|----------|
+| `DATABASE_URL` | Строка подключения к PostgreSQL, например `postgres://USER:PASSWORD@localhost/blog_db` |
+| `JWT_SECRET` | Секрет для подписи JWT (**не короче 32 символов**, храните в секрете) |
+
+Сервер при старте подгружает `blog-server/.env` (через путь к манифесту крейта), затем подхватывает переменные из окружения процесса.
+
+Порты по умолчанию:
+
+- **HTTP:** `0.0.0.0:8080`, префикс API: `/api/...`
+- **gRPC:** `0.0.0.0:50051`, сервис `BlogService`
+
+Файл `.env` не коммитьте (в `.gitignore`).
+
+## База данных
+
+Создайте пустую БД; при первом запуске сервера **миграции применятся автоматически** (`blog-server/migrations/`).
 
 ```bash
-createdb blog_db   # or use psql / GUI
+createdb blog_db   # или через psql / GUI
 ```
 
-## Build everything
+## Проверка сборки (перед сдачей)
+
+Из корня репозитория:
 
 ```bash
 cargo build --workspace
 ```
 
-## Run the API server
+Ожидается успешная сборка всех четырёх крейтов без ошибок.
 
-From the repository root:
+## Сборка
 
 ```bash
-export DATABASE_URL=postgres://...
-export JWT_SECRET=your_32_plus_char_secret   # if not using .env
+cargo build --workspace
+cargo build --workspace --release   # опционально, релизная сборка
+```
+
+## Запуск API-сервера
+
+Из корня репозитория (при использовании `.env` в `blog-server/` переменные можно не экспортировать):
+
+```bash
 cargo run -p blog-server --bin blog-server
 ```
 
-You should see logs for HTTP `:8080` and gRPC `:50051`.
+Либо явно:
 
-### Quick HTTP checks
+```bash
+export DATABASE_URL=postgres://...
+export JWT_SECRET=не_менее_32_символов_секрета
+cargo run -p blog-server --bin blog-server
+```
 
-Register:
+В логах должны появиться сообщения о прослушивании HTTP `:8080` и gRPC `:50051`.
+
+### Примеры HTTP (curl)
+
+Регистрация:
 
 ```bash
 curl -s -X POST http://localhost:8080/api/auth/register \
@@ -67,24 +102,38 @@ curl -s -X POST http://localhost:8080/api/auth/register \
   -d '{"username":"alice","email":"alice@example.com","password":"secret123"}'
 ```
 
-Create a post (replace `TOKEN`):
+Вход:
+
+```bash
+curl -s -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"secret123"}'
+```
+
+Создание поста (подставьте `TOKEN` из ответа регистрации/входа):
 
 ```bash
 curl -s -X POST http://localhost:8080/api/posts \
   -H "Authorization: Bearer TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"title":"Hello","content":"World"}'
+  -d '{"title":"Привет","content":"Текст поста"}'
 ```
 
-List posts:
+Список постов:
 
 ```bash
 curl -s 'http://localhost:8080/api/posts?limit=10&offset=0'
 ```
 
+Пост по id:
+
+```bash
+curl -s http://localhost:8080/api/posts/1
+```
+
 ## CLI (`blog-cli`)
 
-Defaults: HTTP `http://localhost:8080`, gRPC `http://localhost:50051`.
+По умолчанию: HTTP `http://localhost:8080`, gRPC `http://localhost:50051`.
 
 ```bash
 cargo run -p blog-cli --bin blog-cli -- register \
@@ -92,47 +141,62 @@ cargo run -p blog-cli --bin blog-cli -- register \
 
 cargo run -p blog-cli --bin blog-cli -- login --username alice --password secret123
 
-cargo run -p blog-cli --bin blog-cli -- create --title "Hi" --content "Body"
+cargo run -p blog-cli --bin blog-cli -- create --title "Заголовок" --content "Текст"
 
 cargo run -p blog-cli --bin blog-cli -- list --limit 10 --offset 0
 
-cargo run -p blog-cli --bin blog-cli -- --grpc create --title "Via gRPC" --content "..."
+cargo run -p blog-cli --bin blog-cli -- get --id 1
+
+# Тот же сценарий через gRPC:
+cargo run -p blog-cli --bin blog-cli -- --grpc create --title "Через gRPC" --content "..."
 ```
 
-JWT is stored in **`.blog_token`** in the current working directory after `register` / `login`.
+После `register` / `login` JWT сохраняется в файл **`.blog_token`** в текущей рабочей директории.
 
-## WASM frontend
+## WASM-фронтенд
 
-1. Build the WASM package (from repo root):
+1. Соберите пакет одним из способов:
+
+   ```bash
+   wasm-pack build blog-wasm --target web
+   ```
+
+   По умолчанию появится каталог **`blog-wasm/pkg/`** — такой путь указан в корневом `index.html` (`./blog-wasm/pkg/blog_wasm.js`).
+
+   Чтобы положить `pkg` в корень репозитория:
 
    ```bash
    wasm-pack build blog-wasm --target web --out-dir pkg
    ```
 
-   **Or** without wasm-pack (artifact under `target/` only):
+   Тогда в `index.html` замените импорт на `./pkg/blog_wasm.js`.
+
+   Альтернатива без wasm-pack (артефакт в `target/`):
 
    ```bash
    cargo build -p blog-wasm --target wasm32-unknown-unknown --release
    ```
 
-2. If you used wasm-pack with `--out-dir pkg` at the workspace root, update `index.html` import to `./pkg/blog_wasm.js` (the sample `index.html` assumes `./blog-wasm/pkg/blog_wasm.js` when building inside `blog-wasm`).
-
-3. Serve static files (example):
+2. Поднимите статический сервер из каталога, где лежат `index.html` и каталог `pkg`:
 
    ```bash
    python3 -m http.server 8000
    ```
 
-4. Open `http://localhost:8000` — set `API_BASE` in `index.html` if the API is not on `http://localhost:8080`.
+3. Откройте в браузере `http://localhost:8000`. Если API не на `http://localhost:8080`, измените константу `API_BASE` в `index.html`.
 
-**CORS** is permissive in development (`allow_any_origin`). For production, restrict origins in `blog-server` CORS settings.
+В режиме разработки на сервере включён широкий **CORS**; для продакшена ограничьте список разрешённых источников в коде сервера.
 
-## Protocol buffers
+## Protocol Buffers
 
-`blog-server/proto/blog.proto` is the source of truth; an identical copy lives in `blog-client/proto/`. Regeneration is handled by each crate’s `build.rs` with `cargo:rerun-if-changed=proto/blog.proto`.
+Источник схемы: `blog-server/proto/blog.proto`; копия для клиента: `blog-client/proto/blog.proto`. Генерация кода — в `build.rs` каждого крейта, пересборка при изменении proto: `cargo:rerun-if-changed=proto/blog.proto`.
 
-## Troubleshooting
+## Устранение неполадок
 
-- **`sqlx` / DB connection**: ensure `DATABASE_URL` matches a running PostgreSQL instance and the database exists.
-- **JWT errors**: `JWT_SECRET` must be strong enough for HMAC; empty or short secrets may fail at runtime.
-- **WASM + API host**: browsers require CORS; keep the static site origin compatible with server CORS rules (dev uses wide-open settings).
+- **Подключение к БД:** проверьте `DATABASE_URL`, что PostgreSQL запущен и база создана.
+- **JWT:** слабый или пустой `JWT_SECRET` может привести к ошибкам при старте или проверке токенов.
+- **Браузер и CORS:** фронт и API должны быть согласованы по origin или CORS-настройкам сервера.
+
+## English summary
+
+Same workspace: **blog-server** (HTTP :8080, gRPC :50051), **blog-client**, **blog-cli**, **blog-wasm**. Configure `blog-server/.env`, run `cargo build --workspace`, then `cargo run -p blog-server --bin blog-server`. Use `wasm-pack build blog-wasm --target web --out-dir pkg` and a static file server for the bundled `index.html`.

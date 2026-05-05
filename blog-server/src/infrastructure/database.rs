@@ -1,0 +1,15 @@
+//! Пул подключений и встроенные SQL-миграции (применяются при старте).
+
+use sqlx::{postgres::PgPoolOptions, PgPool};
+
+pub async fn create_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
+    PgPoolOptions::new()
+        .max_connections(5)
+        .connect(database_url)
+        .await
+}
+
+pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    // Путь относительно каталога крейта `blog-server/` на этапе компиляции (`CARGO_MANIFEST_DIR`).
+    sqlx::migrate!("./migrations").run(pool).await
+}

@@ -1,0 +1,8 @@
+/target
+.env
+.sqlx/
+.blog_token
+Cargo.lock
+*.swp
+.DS_Store
+.idea/
